@@ -22,18 +22,6 @@ RESOLUTIONS = [
 
 os.makedirs("frames", exist_ok=True)
 
-# pre-check: warn if camera already has an active stream
-try:
-    _pre = parse_stats()
-    _fps = _pre.get("fps", 0)
-    if _fps and _fps > 1.0:
-        print(f"WARNING: camera /stats shows {_fps} fps — another client is already streaming.")
-        print("         Close all browser tabs / VLC pointing at the camera before continuing.")
-        input("         Press Enter to proceed anyway, or Ctrl-C to abort: ")
-except Exception:
-    pass
-print()
-
 def parse_stats():
     try:
         import html as html_lib
@@ -57,6 +45,18 @@ def parse_stats():
         return out
     except Exception:
         return {}
+
+# pre-check: warn if camera already has an active stream
+try:
+    _pre = parse_stats()
+    _fps = _pre.get("fps", 0)
+    if _fps and _fps > 1.0:
+        print(f"WARNING: camera /stats shows {_fps} fps — another client is already streaming.")
+        print("         Close all browser tabs / VLC pointing at the camera before continuing.")
+        input("         Press Enter to proceed anyway, or Ctrl-C to abort: ")
+except Exception:
+    pass
+print()
 
 def measure_fps(stop_evt, result):
     """Collect raw MJPEG bytes, count --frame markers, save first JPEG."""
