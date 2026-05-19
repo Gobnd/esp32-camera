@@ -5,8 +5,9 @@ Prints RSSI and FPS at 1 viewer and 2 viewers.
 """
 import sys, time, threading, requests
 
-CAM = "http://10.10.10.155"
-SETTLE = 8  # seconds to wait after opening streams
+_ip_arg = next((a for a in sys.argv[1:] if a.startswith("http")), None)
+CAM     = _ip_arg if _ip_arg else "http://10.10.10.155"
+SETTLE  = 8  # seconds to wait after opening streams
 
 def parse_stats():
     r = requests.get(f"{CAM}/stats", timeout=5)

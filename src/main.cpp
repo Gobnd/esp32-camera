@@ -31,7 +31,7 @@ WiFiServer tcpServer(80);
 
 unsigned long ledOffMs = 0;   // millis() when LED should turn back off (0 = already off)
 
-volatile float streamFps    = 0.0f;
+volatile uint32_t totalFramesSent = 0;
 volatile int   frameDelayMs = 0;
 volatile int   jpegQuality  = 20;   // 0–63, lower = better quality & bigger file
 
@@ -207,7 +207,7 @@ String buildStatsHtml() {
         "<tr><td>RTSP URL</td><td>rtsp://" + WiFi.localIP().toString() + ":8554/mjpeg/1</td></tr>"
         "<tr><td>Resolution</td><td>"   + String(currentResId) + "</td></tr>"
         "<tr><td>JPEG Quality</td><td>" + String(jpegQuality) + " (0=best/large &rarr; 63=worst/small)</td></tr>"
-        "<tr><td>Stream FPS</td><td>"   + String(streamFps, 1) + " fps (HTTP)</td></tr>"
+        "<tr><td>Stream FPS</td><td>"   + String(millis() > 0 ? totalFramesSent * 1000.0f / (float)millis() : 0.0f, 1) + " fps (HTTP, all clients)</td></tr>"
         "<tr><td>Frame Delay</td><td>"  + String(frameDelayMs) + " ms</td></tr>"
         + motionRows +
         "<tr><td>Est. Current</td><td>~" + String(estMa) + " mA (&plusmn;30%, 3.3&thinsp;V rail)"
@@ -373,17 +373,10 @@ void handleConnection(void* param) {
             client.print("\r\n");
             esp_camera_fb_return(fb);
 
-            fpsFrameCount++;
-            unsigned long now = millis();
-            if (now - fpsWindowStart >= 1000) {
-                streamFps = fpsFrameCount * 1000.0f / (float)(now - fpsWindowStart);
-                fpsFrameCount = 0;
-                fpsWindowStart = now;
-            }
+            totalFramesSent++;
 
             if (frameDelayMs > 0) delay(frameDelayMs);
         }
-        streamFps = 0.0f;
 
     } else if (reqPath == "/photo") {
         camera_fb_t* fb = esp_camera_fb_get();
@@ -543,7 +536,9 @@ void loop() {
     // PIR + camera-based motion confirmation
     bool pirNow = digitalRead(PIR_PIN);
 
-    if (pirNow && !lastPirState) {
+    static unsigned long lastCapMs = 0;
+    if (pirNow && !lastPirState && (millis() - lastCapMs > 5000)) {
+        lastCapMs = millis();
         // Rising edge: flash LED immediately so you can see the PIR fired
         digitalWrite(LED_BUILTIN, HIGH);
         ledOffMs = millis() + 200;

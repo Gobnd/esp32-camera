@@ -4,10 +4,10 @@ Resolution vs FPS test — measures native max FPS at each supported resolution.
 Saves one sample JPEG per resolution to ./frames/.
 Usage: python3 res_fps_test.py
 """
-import os, re, time, threading, requests
+import os, re, sys, time, threading, requests
 from tabulate import tabulate
 
-CAM = "http://10.10.10.155"
+CAM = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1].startswith("http") else "http://10.10.10.155"
 MEASURE_SECS = 12
 SETTLE_SECS  = 2
 

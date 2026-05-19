@@ -20,7 +20,8 @@ from datetime import datetime
 
 import requests
 
-CAMERA_IP  = "10.10.10.155"
+_ip_arg    = next((a for a in sys.argv[1:] if not a.startswith("--")), None)
+CAMERA_IP  = _ip_arg.replace("http://", "").split(":")[0] if _ip_arg else "10.10.10.155"
 BASE_URL   = f"http://{CAMERA_IP}"
 RTSP_URL   = f"rtsp://{CAMERA_IP}:8554/mjpeg/1"
 RESULTS    = []

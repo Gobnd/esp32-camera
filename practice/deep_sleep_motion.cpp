@@ -112,6 +112,32 @@ void initCamera() {
 // The PIR holds its output HIGH while motion is detected, so we wake on HIGH.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Re-init camera, sample one quiet-scene frame into the RTC baseline EMA, deinit.
+// Call this just before goToSleep() so the baseline stays calibrated across wake cycles.
+void updateBaseline() {
+    camera_config_t cfg {};
+    cfg.ledc_channel = LEDC_CHANNEL_0; cfg.ledc_timer = LEDC_TIMER_0;
+    cfg.pin_d0 = Y2_GPIO_NUM; cfg.pin_d1 = Y3_GPIO_NUM; cfg.pin_d2 = Y4_GPIO_NUM;
+    cfg.pin_d3 = Y5_GPIO_NUM; cfg.pin_d4 = Y6_GPIO_NUM; cfg.pin_d5 = Y7_GPIO_NUM;
+    cfg.pin_d6 = Y8_GPIO_NUM; cfg.pin_d7 = Y9_GPIO_NUM;
+    cfg.pin_xclk = XCLK_GPIO_NUM; cfg.pin_pclk = PCLK_GPIO_NUM;
+    cfg.pin_vsync = VSYNC_GPIO_NUM; cfg.pin_href = HREF_GPIO_NUM;
+    cfg.pin_sccb_sda = SIOD_GPIO_NUM; cfg.pin_sccb_scl = SIOC_GPIO_NUM;
+    cfg.pin_pwdn = PWDN_GPIO_NUM; cfg.pin_reset = RESET_GPIO_NUM;
+    cfg.xclk_freq_hz = 20000000; cfg.pixel_format = PIXFORMAT_JPEG;
+    cfg.frame_size = FRAMESIZE_VGA; cfg.jpeg_quality = 20;
+    cfg.fb_count = 2; cfg.fb_location = CAMERA_FB_IN_PSRAM;
+    cfg.grab_mode = CAMERA_GRAB_LATEST;
+    if (esp_camera_init(&cfg) != ESP_OK) return;
+    camera_fb_t* fb = esp_camera_fb_get();
+    if (fb) {
+        baselineJpegLen = 0.7f * baselineJpegLen + 0.3f * (float)fb->len;
+        Serial.printf("Baseline updated: %.0f bytes\n", baselineJpegLen);
+        esp_camera_fb_return(fb);
+    }
+    esp_camera_deinit();
+}
+
 void goToSleep() {
     Serial.println("Going to sleep. Waiting for PIR...");
     Serial.flush();  // make sure Serial output finishes before power cuts
@@ -167,6 +193,7 @@ void servePhotoAndSleep(uint8_t* buf, size_t len, bool inFrame) {
     }
 
     WiFi.disconnect(true);
+    updateBaseline();  // re-sample quiet scene before sleeping so baseline stays calibrated
     goToSleep();
 }
 
@@ -215,14 +242,12 @@ void setup() {
         esp_camera_deinit();  // free camera resources before WiFi starts (both are heavy)
 
         // ── STAGE 5: skip WiFi if not in frame ───────────────────────────────
-        // Uncomment the block below once stage 4 is working and you want
-        // to skip transmission for off-camera triggers:
-        //
-        // if (!inFrame) {
-        //     Serial.println("Not in frame — skipping WiFi, going back to sleep");
-        //     free(copy);
-        //     goToSleep();
-        // }
+        if (!inFrame) {
+            Serial.println("Not in frame — skipping WiFi, going back to sleep");
+            free(copy);
+            updateBaseline();
+            goToSleep();
+        }
 
         if (copy) {
             servePhotoAndSleep(copy, copyLen, inFrame);
