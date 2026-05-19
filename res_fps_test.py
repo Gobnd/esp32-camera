@@ -9,7 +9,7 @@ from tabulate import tabulate
 
 CAM = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1].startswith("http") else "http://10.10.10.155"
 MEASURE_SECS = 12
-SETTLE_SECS  = 2
+SETTLE_SECS  = 5
 
 RESOLUTIONS = [
     ("qvga", "320×240",   "100 cm"),
@@ -46,12 +46,15 @@ def parse_stats():
     except Exception:
         return {}
 
-# pre-check: warn if camera already has an active stream
+# pre-check: sample the lifetime-average FPS twice, 2 seconds apart.
+# If FPS is rising, frames are actively being served → another client is streaming.
+# If FPS is flat or falling, the board is idle (lifetime average decays toward 0 at rest).
 try:
-    _pre = parse_stats()
-    _fps = _pre.get("fps", 0)
-    if _fps and _fps > 1.0:
-        print(f"WARNING: camera /stats shows {_fps} fps — another client is already streaming.")
+    _s1 = parse_stats(); time.sleep(2); _s2 = parse_stats()
+    _f1 = _s1.get("fps", 0) or 0
+    _f2 = _s2.get("fps", 0) or 0
+    if _f2 > _f1 + 0.3:
+        print(f"WARNING: FPS rising ({_f1:.1f} -> {_f2:.1f}) — another client is streaming.")
         print("         Close all browser tabs / VLC pointing at the camera before continuing.")
         input("         Press Enter to proceed anyway, or Ctrl-C to abort: ")
 except Exception:

@@ -459,7 +459,7 @@ if __name__ == "__main__":
 
     try:
         requests.get(BASE_URL, timeout=5)
-        print("Board reachable ✓")
+        print("Board reachable OK")
     except Exception as e:
         print(f"ERROR: Board not reachable ({e})\nCheck IP and WiFi.")
         sys.exit(1)

@@ -41,7 +41,7 @@
 struct Network { const char* ssid; const char* pass; };
 static const Network NETWORKS[] = {
     { "SenSen2", "wongabongamcdonga" },
-    { "Home",    "18lookoutway"      },
+    { "Home2.4g","18lookoutway"      },
 };
 
 #define PIR_PIN         1       // GPIO1 = D0 on XIAO — this is an RTC GPIO, required for ext0 wake
