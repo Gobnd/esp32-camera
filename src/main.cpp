@@ -4,8 +4,11 @@
 #include "CStreamer.h"
 #include "CRtspSession.h"
 
-const char* SSID     = "SenSen2";
-const char* PASSWORD = "wongabongamcdonga";
+struct Network { const char* ssid; const char* pass; };
+static const Network NETWORKS[] = {
+    { "SenSen2", "wongabongamcdonga" },
+    { "Home",    "18lookoutway"      },
+};
 
 #define PWDN_GPIO_NUM   -1
 #define RESET_GPIO_NUM  -1
@@ -512,15 +515,16 @@ void setup() {
     pinMode(LED_BUILTIN, OUTPUT);
     pinMode(PIR_PIN, INPUT_PULLDOWN);   // PULLDOWN prevents spurious triggers when sensor not connected
 
-    WiFi.begin(SSID, PASSWORD);
     Serial.print("Connecting to WiFi");
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
+    for (auto& net : NETWORKS) {
+        WiFi.begin(net.ssid, net.pass);
+        for (int i = 0; i < 16 && WiFi.status() != WL_CONNECTED; i++) {
+            delay(500); Serial.print(".");
+        }
+        if (WiFi.status() == WL_CONNECTED) break;
+        WiFi.disconnect();
     }
-    Serial.println();
-    Serial.print("Open: http://");
-    Serial.println(WiFi.localIP());
+    Serial.printf("\nOpen: http://%s  (on %s)\n", WiFi.localIP().toString().c_str(), WiFi.SSID().c_str());
 
     // Capture an initial quiet-scene baseline so the first motion event has something to compare
     {

@@ -38,8 +38,11 @@
 #include "esp_camera.h"
 #include "driver/rtc_io.h"
 
-const char* SSID     = "SenSen2";
-const char* PASSWORD = "wongabongamcdonga";
+struct Network { const char* ssid; const char* pass; };
+static const Network NETWORKS[] = {
+    { "SenSen2", "wongabongamcdonga" },
+    { "Home",    "18lookoutway"      },
+};
 
 #define PIR_PIN         1       // GPIO1 = D0 on XIAO — this is an RTC GPIO, required for ext0 wake
 
@@ -155,11 +158,13 @@ void goToSleep() {
 
 void servePhotoAndSleep(uint8_t* buf, size_t len, bool inFrame) {
     Serial.print("Connecting to WiFi");
-    WiFi.begin(SSID, PASSWORD);
-    unsigned long t = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - t < 15000) {
-        delay(500);
-        Serial.print(".");
+    for (auto& net : NETWORKS) {
+        WiFi.begin(net.ssid, net.pass);
+        for (int i = 0; i < 20 && WiFi.status() != WL_CONNECTED; i++) {
+            delay(500); Serial.print(".");
+        }
+        if (WiFi.status() == WL_CONNECTED) break;
+        WiFi.disconnect();
     }
     if (WiFi.status() != WL_CONNECTED) {
         Serial.println("\nWiFi failed — sleeping");
