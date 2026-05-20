@@ -6,8 +6,9 @@
 
 struct Network { const char* ssid; const char* pass; };
 static const Network NETWORKS[] = {
-    { "SenSen2", "wongabongamcdonga" },
-    { "Home2.4g","18lookoutway"      },
+    { "SenSen2",        "wongabongamcdonga" },
+    { "Home2.4g",       "18lookoutway"      },
+    { "Gobind's iPhone","12345678"          },
 };
 
 #define PWDN_GPIO_NUM   -1
