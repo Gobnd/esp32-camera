@@ -35,6 +35,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <ESPmDNS.h>
 #include "esp_camera.h"
 #include "driver/rtc_io.h"
 
@@ -147,6 +148,7 @@ void goToSleep() {
     Serial.flush();  // make sure Serial output finishes before power cuts
     rtc_gpio_pulldown_en((gpio_num_t)PIR_PIN);  // hold pin LOW during sleep — prevents spurious wakes from a floating line
     rtc_gpio_pullup_dis((gpio_num_t)PIR_PIN);
+    esp_sleep_enable_timer_wakeup(30ULL * 1000000ULL);  // 30s keepalive — stops power bank from auto-shutting off
     esp_sleep_enable_ext0_wakeup((gpio_num_t)PIR_PIN, 1);  // wake when GPIO1 goes HIGH
     esp_deep_sleep_start();  // this line never returns — chip powers down
 }
@@ -171,7 +173,8 @@ void servePhotoAndSleep(uint8_t* buf, size_t len, bool inFrame) {
         Serial.println("\nWiFi failed — sleeping");
         goToSleep();
     }
-    Serial.printf("\nOpen: http://%s/motion\n", WiFi.localIP().toString().c_str());
+    MDNS.begin("esp32cam");
+    Serial.printf("\nOpen: http://esp32cam.local/motion  (%s)\n", WiFi.localIP().toString().c_str());
 
     WiFiServer server(80);
     server.begin();

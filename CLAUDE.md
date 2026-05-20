@@ -73,6 +73,20 @@ pip install requests tabulate python-docx
 - RTSP: PASS
 - Temp under load: 56–64°C (normal)
 
+## WiFi range test results (as of 2026-05-20, SenSen2)
+| Location                        | RSSI     | FPS (1 viewer) | FPS each (2 viewers) |
+|---------------------------------|----------|----------------|----------------------|
+| Next to router                  | -39 dBm  | 22.5           | 12.5                 |
+| Other side of same room         | -51 dBm  | 24.2           | 12.2                 |
+| Next room                       | -58 dBm  | 23.2           | 10.2                 |
+| Outside building (same floor)   | -76 dBm  | 8.1            | 3.9                  |
+| Outside building (diff. floor)  | -86 dBm  | 3.5            | 1.8                  |
+
+- Usable streaming (>10 fps/viewer) cuts off at the building wall
+- Inside: signal stays above -60 dBm, FPS stays above 20
+- Outside: signal drops to -76 to -86 dBm, FPS collapses to 3–8
+- Across the street: unreachable (No route to host)
+
 ## Files
 - `src/main.cpp` — firmware (working, do not break)
 - `practice/pir_practice.cpp` — scratch file for learning, not compiled

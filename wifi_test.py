@@ -3,54 +3,65 @@
 Run once per location: python3 wifi_test.py "next to router"
 Prints RSSI and FPS at 1 viewer and 2 viewers.
 """
-import sys, time, threading, requests
+import sys, time, threading, requests, re
 
 _ip_arg = next((a for a in sys.argv[1:] if a.startswith("http")), None)
 CAM     = _ip_arg if _ip_arg else "http://10.10.10.155"
-SETTLE  = 8  # seconds to wait after opening streams
+MEASURE = 10  # seconds to count frames
 
-def parse_stats():
-    r = requests.get(f"{CAM}/stats", timeout=5)
-    rssi = fps = None
-    for line in r.text.splitlines():
-        l = line.lower()
-        if "rssi" in l:
-            import re
-            m = re.search(r"(-?\d+)", line)
-            if m: rssi = int(m.group(1))
-        if "stream" in l and "fps" in l:
-            m = re.search(r"([\d.]+)", line)
-            if m: fps = float(m.group(1))
-    return rssi, fps
+def get_rssi():
+    page = requests.get(f"{CAM}/stats", timeout=5).text
+    m = re.search(r"WiFi Signal</td><td>(-?\d+)", page)
+    return int(m.group(1)) if m else None
 
-def stream_thread(stop):
+def measure_fps(result, stop):
+    """Count --frame boundaries in the MJPEG stream for MEASURE seconds."""
+    frames = 0
+    buf = b""
     try:
-        with requests.get(f"{CAM}/stream", stream=True, timeout=120) as r:
+        with requests.get(f"{CAM}/stream", stream=True, timeout=MEASURE + 5) as r:
+            t0 = time.time()
             for chunk in r.iter_content(chunk_size=4096):
                 if stop.is_set():
                     break
+                buf += chunk
+                count = buf.count(b"--frame")
+                if count > 1:
+                    frames += count - 1
+                    buf = buf[buf.rfind(b"--frame"):]
+            result["elapsed"] = time.time() - t0
     except Exception:
-        pass
+        result["elapsed"] = MEASURE
+    result["frames"] = frames
 
-location = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "unknown"
+location = " ".join(a for a in sys.argv[1:] if not a.startswith("http")) or "unknown"
 print(f"\nLocation: {location}")
 print("-" * 40)
 
 # 1 viewer
 stop1 = threading.Event()
-t1 = threading.Thread(target=stream_thread, args=(stop1,), daemon=True)
+res1  = {"frames": 0, "elapsed": MEASURE}
+t1 = threading.Thread(target=measure_fps, args=(res1, stop1), daemon=True)
 t1.start()
-time.sleep(SETTLE)
-rssi, fps = parse_stats()
-print(f"1 viewer  — RSSI: {rssi} dBm  |  FPS: {fps}")
+time.sleep(MEASURE)
+stop1.set(); t1.join(timeout=3)
+rssi = get_rssi()
+fps1 = res1["frames"] / max(res1["elapsed"], 1)
+print(f"1 viewer  — RSSI: {rssi} dBm  |  FPS: {fps1:.1f}")
 
-# 2 viewers
-stop2 = threading.Event()
-t2 = threading.Thread(target=stream_thread, args=(stop2,), daemon=True)
-t2.start()
-time.sleep(SETTLE)
-rssi2, fps2 = parse_stats()
-print(f"2 viewers — RSSI: {rssi2} dBm  |  FPS: {fps2}")
-
-stop1.set(); stop2.set()
+# 2 viewers — keep t1's stream alive, add t2
+stop1b = threading.Event()
+stop2  = threading.Event()
+res1b  = {"frames": 0, "elapsed": MEASURE}
+res2   = {"frames": 0, "elapsed": MEASURE}
+t1b = threading.Thread(target=measure_fps, args=(res1b, stop1b), daemon=True)
+t2  = threading.Thread(target=measure_fps, args=(res2,  stop2),  daemon=True)
+t1b.start(); t2.start()
+time.sleep(MEASURE)
+stop1b.set(); stop2.set()
+t1b.join(timeout=3); t2.join(timeout=3)
+rssi2 = get_rssi()
+combined = (res1b["frames"] + res2["frames"]) / max(res1b["elapsed"], 1)
+fps2 = combined / 2
+print(f"2 viewers — RSSI: {rssi2} dBm  |  FPS: {fps2:.1f} each  ({combined:.1f} combined)")
 print()

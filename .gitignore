@@ -4,6 +4,8 @@
 .vscode/launch.json
 .vscode/ipch
 frames/
+motion_captures/
+motion_captures_deepsleep/
 __pycache__/
 *.pyc
 test_results.json

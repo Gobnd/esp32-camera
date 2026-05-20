@@ -27,6 +27,7 @@ RTSP_URL   = f"rtsp://{CAMERA_IP}:8554/mjpeg/1"
 RESULTS    = []
 SEP        = "─" * 62
 RUN_MOTION = "--motion" in sys.argv
+RUN_WIFI   = "--wifi"   in sys.argv
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -172,6 +173,55 @@ def run_test1_motion(duration=30):
 
     RESULTS.append(("T1", {"duration_s": duration, "events": events}))
     print(f"\n  Total new captures detected: {len(events)}")
+
+
+# ── Test 2 — WiFi range ────────────────────────────────────────────────────────
+
+def run_test2_wifi():
+    """Interactive WiFi range test — place camera at each location, press Enter."""
+    print(f"\n{SEP}")
+    print("TEST 2 — WiFi Range (interactive)")
+    print(f"{SEP}")
+    print("  For each location: move the camera, then type the location name and press Enter.")
+    print("  Press Enter with no name to finish.\n")
+
+    MEASURE = 10
+    rows = []
+    print(f"  {'Location':<32}  {'RSSI':>8}  {'1 viewer':>10}  {'each (2v)':>10}")
+    print(f"  {'-'*32}  {'-'*8}  {'-'*10}  {'-'*10}")
+
+    while True:
+        loc = input("\n  Location name (blank to finish): ").strip()
+        if not loc:
+            break
+
+        # 1 viewer
+        stop1 = threading.Event()
+        fc1   = {0: 0}
+        t1 = threading.Thread(target=stream_worker, args=(stop1, fc1, 0), daemon=True)
+        t1.start()
+        time.sleep(MEASURE)
+        stop1.set(); t1.join(timeout=3)
+        rssi = parse_stats().get("rssi", "?")
+        fps1 = fc1[0] / MEASURE
+
+        # 2 viewers
+        stop2a = threading.Event(); stop2b = threading.Event()
+        fc2 = {0: 0, 1: 0}
+        ta = threading.Thread(target=stream_worker, args=(stop2a, fc2, 0), daemon=True)
+        tb = threading.Thread(target=stream_worker, args=(stop2b, fc2, 1), daemon=True)
+        ta.start(); tb.start()
+        time.sleep(MEASURE)
+        stop2a.set(); stop2b.set()
+        ta.join(timeout=3); tb.join(timeout=3)
+        fps2_each = (fc2[0] + fc2[1]) / MEASURE / 2
+
+        row = {"location": loc, "rssi": rssi, "fps_1v": round(fps1, 1), "fps_2v_each": round(fps2_each, 1)}
+        rows.append(row)
+        RESULTS.append(("T2", row))
+        print(f"  {loc:<32}  {rssi:>8}  {fps1:>9.1f}  {fps2_each:>9.1f}")
+
+    print(f"\n  WiFi range test complete — {len(rows)} location(s) measured.")
 
 
 # ── Test 4 — power / stats ─────────────────────────────────────────────────────
@@ -391,6 +441,15 @@ def print_summary():
     print(f"Camera : {BASE_URL}")
     print(f"Time   : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
+    t2_rows = [r for tag, r in RESULTS if tag == "T2"]
+    if t2_rows:
+        print("TEST 2: WiFi Range")
+        print(f"  {'Location':<32}  {'RSSI':>8}  {'1 viewer':>10}  {'each (2v)':>10}")
+        print(f"  {'-'*32}  {'-'*8}  {'-'*10}  {'-'*10}")
+        for r in t2_rows:
+            print(f"  {r['location']:<32}  {r['rssi']:>8}  {r['fps_1v']:>10}  {r['fps_2v_each']:>10}")
+        print()
+
     if RUN_MOTION:
         print("TEST 1: Motion Captures")
         t1_rows = [r for tag, r in RESULTS if tag == "T1"]
@@ -455,7 +514,8 @@ def print_summary():
 if __name__ == "__main__":
     print("ESP32S3 Camera: Automated Test Suite")
     print(f"Target : {BASE_URL}")
-    print(f"Motion : {'ENABLED (--motion)' if RUN_MOTION else 'skipped (pass --motion to enable)'}\n")
+    print(f"Motion : {'ENABLED (--motion)' if RUN_MOTION else 'skipped (pass --motion to enable)'}")
+    print(f"WiFi   : {'ENABLED (--wifi)'   if RUN_WIFI   else 'skipped (pass --wifi to enable)'}\n")
 
     try:
         requests.get(BASE_URL, timeout=5)
@@ -493,6 +553,9 @@ if __name__ == "__main__":
         time.sleep(2)
     else:
         print(" timeout — proceeding anyway\n")
+
+    if RUN_WIFI:
+        run_test2_wifi()
 
     run_test4_power()
     run_test6_rtsp()
