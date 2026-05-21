@@ -1,5 +1,4 @@
-// deep_sleep_motion.cpp — NOT compiled by PlatformIO (it's outside src/)
-// To test: copy this file's content into src/main.cpp (back up the original first)
+// main_deepsleep.cpp — deep sleep learning reference, compiled via [env:deepsleep]
 //
 // GOAL: camera only wakes when PIR detects motion, then goes back to deep sleep.
 // No live stream. No persistent web server. ~14µA while sleeping vs ~250mA awake.
@@ -38,6 +37,7 @@
 #include <ESPmDNS.h>
 #include "esp_camera.h"
 #include "driver/rtc_io.h"
+#include "camera_pins.h"    // GPIO1 = D0 = RTC_GPIO0, required for ext0 wakeup
 
 struct Network { const char* ssid; const char* pass; };
 static const Network NETWORKS[] = {
@@ -45,25 +45,6 @@ static const Network NETWORKS[] = {
     { "Home2.4g",       "18lookoutway"      },
     { "Gobind's iPhone","12345678"          },
 };
-
-#define PIR_PIN         1       // GPIO1 = D0 on XIAO — this is an RTC GPIO, required for ext0 wake
-
-#define PWDN_GPIO_NUM   -1
-#define RESET_GPIO_NUM  -1
-#define XCLK_GPIO_NUM   10
-#define SIOD_GPIO_NUM   40
-#define SIOC_GPIO_NUM   39
-#define Y9_GPIO_NUM     48
-#define Y8_GPIO_NUM     11
-#define Y7_GPIO_NUM     12
-#define Y6_GPIO_NUM     14
-#define Y5_GPIO_NUM     16
-#define Y4_GPIO_NUM     18
-#define Y3_GPIO_NUM     17
-#define Y2_GPIO_NUM     15
-#define VSYNC_GPIO_NUM  38
-#define HREF_GPIO_NUM   47
-#define PCLK_GPIO_NUM   13
 
 // ── RTC RAM: survives deep sleep, lost only on hard reset or power loss ───────
 // Declare any variable you need to remember across sleep cycles with RTC_DATA_ATTR.
@@ -77,7 +58,7 @@ void goToSleep();  // forward declaration — defined after initCamera()
 // STAGE 1 — Camera init (same pins as main.cpp, same config)
 // ─────────────────────────────────────────────────────────────────────────────
 
-void initCamera() {
+bool initCamera() {
     camera_config_t cfg {};
     cfg.ledc_channel = LEDC_CHANNEL_0;
     cfg.ledc_timer   = LEDC_TIMER_0;
@@ -104,11 +85,7 @@ void initCamera() {
     cfg.fb_count     = 2;
     cfg.fb_location  = CAMERA_FB_IN_PSRAM;
     cfg.grab_mode    = CAMERA_GRAB_LATEST;
-
-    if (esp_camera_init(&cfg) != ESP_OK) {
-        Serial.println("Camera init failed — sleeping 5s and retrying");
-        goToSleep();
-    }
+    return esp_camera_init(&cfg) == ESP_OK;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -120,20 +97,7 @@ void initCamera() {
 // Re-init camera, sample one quiet-scene frame into the RTC baseline EMA, deinit.
 // Call this just before goToSleep() so the baseline stays calibrated across wake cycles.
 void updateBaseline() {
-    camera_config_t cfg {};
-    cfg.ledc_channel = LEDC_CHANNEL_0; cfg.ledc_timer = LEDC_TIMER_0;
-    cfg.pin_d0 = Y2_GPIO_NUM; cfg.pin_d1 = Y3_GPIO_NUM; cfg.pin_d2 = Y4_GPIO_NUM;
-    cfg.pin_d3 = Y5_GPIO_NUM; cfg.pin_d4 = Y6_GPIO_NUM; cfg.pin_d5 = Y7_GPIO_NUM;
-    cfg.pin_d6 = Y8_GPIO_NUM; cfg.pin_d7 = Y9_GPIO_NUM;
-    cfg.pin_xclk = XCLK_GPIO_NUM; cfg.pin_pclk = PCLK_GPIO_NUM;
-    cfg.pin_vsync = VSYNC_GPIO_NUM; cfg.pin_href = HREF_GPIO_NUM;
-    cfg.pin_sccb_sda = SIOD_GPIO_NUM; cfg.pin_sccb_scl = SIOC_GPIO_NUM;
-    cfg.pin_pwdn = PWDN_GPIO_NUM; cfg.pin_reset = RESET_GPIO_NUM;
-    cfg.xclk_freq_hz = 20000000; cfg.pixel_format = PIXFORMAT_JPEG;
-    cfg.frame_size = FRAMESIZE_VGA; cfg.jpeg_quality = 20;
-    cfg.fb_count = 2; cfg.fb_location = CAMERA_FB_IN_PSRAM;
-    cfg.grab_mode = CAMERA_GRAB_LATEST;
-    if (esp_camera_init(&cfg) != ESP_OK) return;
+    if (!initCamera()) return;
     camera_fb_t* fb = esp_camera_fb_get();
     if (fb) {
         baselineJpegLen = 0.7f * baselineJpegLen + 0.3f * (float)fb->len;
@@ -225,7 +189,10 @@ void setup() {
         // ── PIR fired ────────────────────────────────────────────────────────
         Serial.println("Wake cause: PIR motion");
 
-        initCamera();
+        if (!initCamera()) {
+            Serial.println("Camera init failed");
+            goToSleep();
+        }
 
         // Discard the buffered (stale) frame, grab a fresh one
         { camera_fb_t* s = esp_camera_fb_get(); if (s) esp_camera_fb_return(s); }
@@ -258,10 +225,13 @@ void setup() {
             goToSleep();
         }
 
-        if (copy) {
-            servePhotoAndSleep(copy, copyLen, inFrame);
-            // servePhotoAndSleep calls goToSleep() at the end — never returns
+        if (!copy) {
+            // ps_malloc failed — can't serve the photo; update baseline and sleep
+            updateBaseline();
+            goToSleep();
         }
+        servePhotoAndSleep(copy, copyLen, inFrame);
+        // servePhotoAndSleep calls goToSleep() at the end — never returns
 
     } else {
         // ── First boot (or manual reset) ──────────────────────────────────────
@@ -270,7 +240,7 @@ void setup() {
         // Instead, take a quiet-scene baseline and go to sleep.
         Serial.println("First boot — capturing baseline, then sleeping");
 
-        initCamera();
+        if (!initCamera()) { goToSleep(); }
         camera_fb_t* fb = esp_camera_fb_get();
         if (fb) {
             baselineJpegLen = (float)fb->len;  // stored in RTC RAM — survives all future sleeps

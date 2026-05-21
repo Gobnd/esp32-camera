@@ -3,6 +3,7 @@
 #include "esp_camera.h"
 #include "CStreamer.h"
 #include "CRtspSession.h"
+#include "camera_pins.h"
 
 struct Network { const char* ssid; const char* pass; };
 static const Network NETWORKS[] = {
@@ -10,26 +11,6 @@ static const Network NETWORKS[] = {
     { "Home2.4g",       "18lookoutway"      },
     { "Gobind's iPhone","12345678"          },
 };
-
-#define PWDN_GPIO_NUM   -1
-#define RESET_GPIO_NUM  -1
-#define XCLK_GPIO_NUM   10
-#define SIOD_GPIO_NUM   40
-#define SIOC_GPIO_NUM   39
-#define Y9_GPIO_NUM     48
-#define Y8_GPIO_NUM     11
-#define Y7_GPIO_NUM     12
-#define Y6_GPIO_NUM     14
-#define Y5_GPIO_NUM     16
-#define Y4_GPIO_NUM     18
-#define Y3_GPIO_NUM     17
-#define Y2_GPIO_NUM     15
-#define VSYNC_GPIO_NUM  38
-#define HREF_GPIO_NUM   47
-#define PCLK_GPIO_NUM   13
-
-// Grove PIR motion sensor — connect signal wire to D0 on the XIAO
-#define PIR_PIN         1
 
 WiFiServer tcpServer(80);
 
@@ -90,6 +71,7 @@ void setResolution(const String& id) {
     for (auto& opt : RES_OPTIONS) {
         if (id == opt.id) {
             sensor_t* s = esp_camera_sensor_get();
+            if (!s) return;
             s->set_framesize(s, opt.size);
             currentResId = opt.id;
             currentW     = opt.w;
@@ -103,6 +85,7 @@ void setResolution(const String& id) {
 void setQuality(int q) {
     q = q < 4 ? 4 : q > 63 ? 63 : q;
     sensor_t* s = esp_camera_sensor_get();
+    if (!s) return;
     s->set_quality(s, q);
     jpegQuality = q;
     Serial.printf("JPEG quality -> %d\n", q);
@@ -137,8 +120,9 @@ void initCamera() {
     cfg.grab_mode    = CAMERA_GRAB_LATEST;
 
     if (esp_camera_init(&cfg) != ESP_OK) {
-        Serial.println("Camera init failed");
-        while (true) delay(1000);
+        Serial.println("Camera init failed — restarting in 3s");
+        delay(3000);
+        ESP.restart();
     }
     Serial.println("Camera ready");
 }
@@ -178,7 +162,6 @@ String buildStatsHtml() {
     const char* tempNote = (temp < 60) ? "normal" : (temp < 75) ? "warm" : "hot";
     uint32_t now = millis();
 
-    // Build motion rows outside the string concat so we can use loops
     String motionRows = "<tr><td>Motion Captures</td><td>" + String(motionCount) + " / " + String(MOTION_SLOTS) + "</td></tr>";
     for (int i = 0; i < motionCount; i++) {
         MotionCapture& cap = motionSlots[motionSlotIdx(i)];
@@ -364,9 +347,6 @@ void handleConnection(void* param) {
         client.println("Content-Type: multipart/x-mixed-replace; boundary=frame");
         client.println("Connection: keep-alive");
         client.println();
-
-        unsigned long fpsWindowStart = millis();
-        int fpsFrameCount = 0;
 
         while (client.connected()) {
             camera_fb_t* fb = esp_camera_fb_get();
@@ -561,14 +541,16 @@ void loop() {
             if (xSemaphoreTake(motionMutex, pdMS_TO_TICKS(500))) {
                 MotionCapture& slot = motionSlots[motionHead];
                 free(slot.buf);
-                slot.buf       = (uint8_t*)ps_malloc(fb->len);
-                slot.len       = fb->len;
-                slot.ms        = millis();
-                slot.latencyMs = latency;
-                slot.inFrame   = inFrame;
-                if (slot.buf) memcpy(slot.buf, fb->buf, fb->len);
-                motionHead  = (motionHead + 1) % MOTION_SLOTS;
-                motionCount = motionCount < MOTION_SLOTS ? motionCount + 1 : MOTION_SLOTS;
+                slot.buf = (uint8_t*)ps_malloc(fb->len);
+                if (slot.buf) {
+                    memcpy(slot.buf, fb->buf, fb->len);
+                    slot.len       = fb->len;
+                    slot.ms        = millis();
+                    slot.latencyMs = latency;
+                    slot.inFrame   = inFrame;
+                    motionHead  = (motionHead + 1) % MOTION_SLOTS;
+                    motionCount = motionCount < MOTION_SLOTS ? motionCount + 1 : MOTION_SLOTS;
+                }
                 xSemaphoreGive(motionMutex);
             }
 

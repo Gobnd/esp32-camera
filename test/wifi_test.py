@@ -61,7 +61,7 @@ time.sleep(MEASURE)
 stop1b.set(); stop2.set()
 t1b.join(timeout=3); t2.join(timeout=3)
 rssi2 = get_rssi()
-combined = (res1b["frames"] + res2["frames"]) / max(res1b["elapsed"], 1)
+combined = (res1b["frames"] + res2["frames"]) / max(res1b["elapsed"], res2["elapsed"], 1)
 fps2 = combined / 2
 print(f"2 viewers — RSSI: {rssi2} dBm  |  FPS: {fps2:.1f} each  ({combined:.1f} combined)")
 print()
