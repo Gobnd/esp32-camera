@@ -200,11 +200,12 @@ void setup() {
         { camera_fb_t* s = esp_camera_fb_get(); if (s) esp_camera_fb_return(s); }
         streamAndSleep();
     } else {
-        // Timer keepalive or first boot — go straight back to sleep
-        if (cause == ESP_SLEEP_WAKEUP_UNDEFINED)
-            Serial.println("First boot — sleeping");
-        else
+        if (cause == ESP_SLEEP_WAKEUP_UNDEFINED) {
+            Serial.println("First boot — staying awake 10s for upload window");
+            delay(10000);
+        } else {
             Serial.println("Timer keepalive — sleeping");
+        }
         goToSleep();
     }
 }
