@@ -17,10 +17,7 @@
 #include "driver/rtc_io.h"
 #include "camera_pins.h"
 
-#define SD_CS   3
-#define SD_SCK  7
-#define SD_MISO 8
-#define SD_MOSI 9
+#define SD_CS   21
 
 #define SAVE_INTERVAL_MS 1000
 
@@ -73,7 +70,6 @@ bool initCamera() {
 }
 
 static bool initSD() {
-    SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
     if (!SD.begin(SD_CS)) {
         Serial.println("SD init failed — captures will not be saved");
         return false;
@@ -102,35 +98,36 @@ static void saveFrame(camera_fb_t* fb, const char* folder, int n) {
 }
 
 void streamAndSleep() {
+    bool sdReady = initSD();
+    char folder[48] = {};
+    int frameN = 0;
+    unsigned long lastSaveMs = 0;
+
     // Connect WiFi
+    bool wifiOk = false;
     Serial.print("Connecting to WiFi");
     for (auto& net : NETWORKS) {
         WiFi.begin(net.ssid, net.pass);
         for (int i = 0; i < 20 && WiFi.status() != WL_CONNECTED; i++) {
             delay(500); Serial.print(".");
         }
-        if (WiFi.status() == WL_CONNECTED) break;
+        if (WiFi.status() == WL_CONNECTED) { wifiOk = true; break; }
         WiFi.disconnect();
     }
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("\nWiFi failed");
-        goToSleep();
+
+    if (wifiOk) {
+        configTime(0, 0, "pool.ntp.org");
+        MDNS.begin("esp32cam");
+        Serial.printf("\nStreaming: http://esp32cam.local/stream  (%s)\n",
+                      WiFi.localIP().toString().c_str());
+    } else {
+        Serial.println("\nWiFi failed — SD only");
     }
 
-    configTime(0, 0, "pool.ntp.org");
-
-    MDNS.begin("esp32cam");
-    Serial.printf("\nStreaming: http://esp32cam.local/stream  (%s)\n",
-                  WiFi.localIP().toString().c_str());
-
-    bool sdReady = initSD();
-    char folder[48] = {};
-    int frameN = 0;
-    unsigned long lastSaveMs = 0;
     if (sdReady) makeEventFolder(folder, sizeof(folder));
 
     WiFiServer server(80);
-    server.begin();
+    if (wifiOk) server.begin();
 
     unsigned long deadline = millis() + (STREAM_SECS * 1000UL);
 
@@ -144,6 +141,8 @@ void streamAndSleep() {
             }
             lastSaveMs = millis();
         }
+
+        if (!wifiOk) { delay(5); continue; }
 
         WiFiClient client = server.accept();
         if (!client) { delay(5); continue; }
@@ -178,13 +177,13 @@ void streamAndSleep() {
     }
 
     Serial.printf("Event complete — %d frames saved to %s\n", frameN, folder);
-    WiFi.disconnect(true);
+    if (wifiOk) WiFi.disconnect(true);
     goToSleep();
 }
 
 void setup() {
     Serial.begin(115200);
-    delay(300);
+    delay(1500);
     bootCount++;
     Serial.printf("\n=== Wake #%d ===\n", bootCount);
 
@@ -201,8 +200,8 @@ void setup() {
         streamAndSleep();
     } else {
         if (cause == ESP_SLEEP_WAKEUP_UNDEFINED) {
-            Serial.println("First boot — staying awake 10s for upload window");
-            delay(10000);
+            Serial.println("First boot — staying awake 60s for upload window");
+            delay(60000);
         } else {
             Serial.println("Timer keepalive — sleeping");
         }

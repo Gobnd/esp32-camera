@@ -13,3 +13,4 @@ __pycache__/
 *.pyc
 test_results.json
 test/test_results.json
+test/Cam_tests.docx
