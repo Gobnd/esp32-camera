@@ -10,9 +10,19 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <ESPmDNS.h>
+#include <SD.h>
+#include <SPI.h>
+#include <time.h>
 #include "esp_camera.h"
 #include "driver/rtc_io.h"
 #include "camera_pins.h"
+
+#define SD_CS   3
+#define SD_SCK  7
+#define SD_MISO 8
+#define SD_MOSI 9
+
+#define SAVE_INTERVAL_MS 1000
 
 struct Network { const char* ssid; const char* pass; };
 static const Network NETWORKS[] = {
@@ -62,6 +72,35 @@ bool initCamera() {
     return esp_camera_init(&cfg) == ESP_OK;
 }
 
+static bool initSD() {
+    SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+    if (!SD.begin(SD_CS)) {
+        Serial.println("SD init failed — captures will not be saved");
+        return false;
+    }
+    Serial.println("SD ready");
+    return true;
+}
+
+static void makeEventFolder(char* folder, size_t len) {
+    struct tm t;
+    if (getLocalTime(&t, 100)) {
+        strftime(folder, len, "/captures/%Y-%m-%d_%H-%M-%S", &t);
+    } else {
+        snprintf(folder, len, "/captures/wake_%04d", bootCount);
+    }
+    SD.mkdir("/captures");
+    SD.mkdir(folder);
+    Serial.printf("Folder: %s\n", folder);
+}
+
+static void saveFrame(camera_fb_t* fb, const char* folder, int n) {
+    char path[64];
+    snprintf(path, sizeof(path), "%s/frame_%03d.jpg", folder, n);
+    File f = SD.open(path, FILE_WRITE);
+    if (f) { f.write(fb->buf, fb->len); f.close(); }
+}
+
 void streamAndSleep() {
     // Connect WiFi
     Serial.print("Connecting to WiFi");
@@ -78,9 +117,17 @@ void streamAndSleep() {
         goToSleep();
     }
 
+    configTime(0, 0, "pool.ntp.org");
+
     MDNS.begin("esp32cam");
     Serial.printf("\nStreaming: http://esp32cam.local/stream  (%s)\n",
                   WiFi.localIP().toString().c_str());
+
+    bool sdReady = initSD();
+    char folder[48] = {};
+    int frameN = 0;
+    unsigned long lastSaveMs = 0;
+    if (sdReady) makeEventFolder(folder, sizeof(folder));
 
     WiFiServer server(80);
     server.begin();
@@ -88,6 +135,16 @@ void streamAndSleep() {
     unsigned long deadline = millis() + (STREAM_SECS * 1000UL);
 
     while (millis() < deadline) {
+        // Save one frame per second to SD
+        if (sdReady && millis() - lastSaveMs >= SAVE_INTERVAL_MS) {
+            camera_fb_t* fb = esp_camera_fb_get();
+            if (fb) {
+                saveFrame(fb, folder, frameN++);
+                esp_camera_fb_return(fb);
+            }
+            lastSaveMs = millis();
+        }
+
         WiFiClient client = server.accept();
         if (!client) { delay(5); continue; }
 
@@ -109,11 +166,18 @@ void streamAndSleep() {
             client.write(fb->buf, fb->len);
             client.print("\r\n");
             esp_camera_fb_return(fb);
+
+            // Keep saving to SD even while streaming
+            if (sdReady && millis() - lastSaveMs >= SAVE_INTERVAL_MS) {
+                saveFrame(fb, folder, frameN++);
+                lastSaveMs = millis();
+            }
         }
         client.stop();
-        Serial.println("Client disconnected");
+        Serial.printf("Client disconnected (%d frames saved)\n", frameN);
     }
 
+    Serial.printf("Event complete — %d frames saved to %s\n", frameN, folder);
     WiFi.disconnect(true);
     goToSleep();
 }
